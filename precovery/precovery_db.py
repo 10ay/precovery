@@ -1,5 +1,6 @@
 import os
 import dataclasses
+import healpy as hp
 import itertools
 import logging
 import numpy as np
@@ -134,9 +135,20 @@ class PrecoveryDatabase:
         max_matches: Optional[int] = None,
         start_mjd: Optional[float] = None,
         end_mjd: Optional[float] = None,
+        nside: int = 256,
         window_size: int = 7,
-        include_frame_candidates: bool = False
+        include_frame_candidates: bool = False,
     ):
+
+        requested_nside = nside
+
+
+    #self.frames.healpix_nside = nside
+
+
+    #Add custom nside
+    
+
         """
         Find observations which match orbit in the database. Observations are
         searched in descending order by mjd.
@@ -188,7 +200,9 @@ class PrecoveryDatabase:
             windows, key=lambda pair: pair[1]
         ):
             mjds = [window[0] for window in obs_windows]
-            matches = self._check_windows(
+
+            matches_actual_nside = self._check_windows(
+                requested_nside,
                 mjds,
                 obscode,
                 orbit,
@@ -196,16 +210,30 @@ class PrecoveryDatabase:
                 start_mjd=start_mjd,
                 end_mjd=end_mjd,
                 window_size=window_size,
-                include_frame_candidates=include_frame_candidates
+                include_frame_candidates=include_frame_candidates,
             )
-            for result in matches:
+
+            
+            matches_requested_nside = self._check_windows(
+                self.frames.healpix_nside,
+                mjds,
+                obscode,
+                orbit,
+                tolerance,
+                start_mjd=start_mjd,
+                end_mjd=end_mjd,
+                window_size=window_size,
+                include_frame_candidates=include_frame_candidates,
+            )
+            for result in matches_requested_nside:
                 yield result
                 n += 1
                 if max_matches is not None and n >= max_matches:
                     return
-
+    
     def _check_windows(
         self,
+        requested_nside,
         window_midpoints: Iterable[float],
         obscode: str,
         orbit: Orbit,
@@ -226,7 +254,7 @@ class PrecoveryDatabase:
         window_healpixels = radec_to_healpixel(
             np.array([w.ra for w in window_ephems]),
             np.array([w.dec for w in window_ephems]),
-            self.frames.healpix_nside,
+            requested_nside
         ).astype(int)
 
         # Using the propagated orbits, check each window. Propagate the orbit from the center of
@@ -267,7 +295,7 @@ class PrecoveryDatabase:
                 timedeltas,
             )
             approx_healpixels = radec_to_healpixel(
-                approx_ras, approx_decs, self.frames.healpix_nside
+                approx_ras, approx_decs, requested_nside
             ).astype(int)
 
             keep_mjds = []
