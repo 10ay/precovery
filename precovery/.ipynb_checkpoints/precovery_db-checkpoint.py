@@ -1,6 +1,5 @@
 import os
 import dataclasses
-import healpy as hp
 import itertools
 import logging
 import numpy as np
@@ -97,7 +96,7 @@ class PrecoveryDatabase:
 
         data_path = os.path.join(directory, "data")
         frame_db = FrameDB(
-            frame_idx, data_path, config.data_file_max_size, config.nside
+            frame_idx, data_path, config.data_file_max_size, nside
         )
         return cls(frame_db)
 
@@ -135,22 +134,25 @@ class PrecoveryDatabase:
         max_matches: Optional[int] = None,
         start_mjd: Optional[float] = None,
         end_mjd: Optional[float] = None,
-        nside: int = 256,
         window_size: int = 7,
         include_frame_candidates: bool = False,
+        nside: int = 32;
     ):
-        requested_nside = nside #We take in a requested nside
-    #self.frames.healpix_nside = actual nside of the database/the nside the database is indexed at
-    
+
+    #Add custom nside
 
         """
         Find observations which match orbit in the database. Observations are
         searched in descending order by mjd.
+
         orbit: The orbit to match.
+
         max_matches: End once this many matches have been found. If None, find
         all matches.
+
         start_mjd: Only consider observations from after this epoch
         (inclusive). If None, find all.
+
         end_mjd: Only consider observations from before this epoch (inclusive).
         If None, find all.
         """
@@ -190,11 +192,7 @@ class PrecoveryDatabase:
             windows, key=lambda pair: pair[1]
         ):
             mjds = [window[0] for window in obs_windows]
-
-
-            #We now check for matches at a requested nside
-            matches_requested_nside = self._check_windows(
-                requested_nside,
+            matches = self._check_windows(
                 mjds,
                 obscode,
                 orbit,
@@ -202,18 +200,16 @@ class PrecoveryDatabase:
                 start_mjd=start_mjd,
                 end_mjd=end_mjd,
                 window_size=window_size,
-                include_frame_candidates=include_frame_candidates,
+                include_frame_candidates=include_frame_candidates
             )
-            
-            for result in matches_requested_nside:
+            for result in matches:
                 yield result
                 n += 1
                 if max_matches is not None and n >= max_matches:
                     return
-    
+
     def _check_windows(
         self,
-        requested_nside,
         window_midpoints: Iterable[float],
         obscode: str,
         orbit: Orbit,
@@ -226,27 +222,15 @@ class PrecoveryDatabase:
         """
         Find all observations that match orbit within a list of windows
         """
-
-        #Used Latter for resampling healpixels from requested_nside to actual_nside
-        nside_ratio = int(self.frames.healpix_nside/requested_nside)
-        bitwise_factor = 2*(self.findPosition(nside_ratio)-1)
-
-
-
         # Propagate the orbit with n-body to every window center
         orbit_propagated = orbit.propagate(window_midpoints, PropagationIntegrator.N_BODY)
 
         # Calculate the location of the orbit on the sky with n-body propagation
         window_ephems = orbit.compute_ephemeris(obscode, window_midpoints, PropagationIntegrator.N_BODY)
-    
-
-
-        #The window_healpixels calculates healpixels using the given requested_nside. We now only check windows found using the requested_nside.
         window_healpixels = radec_to_healpixel(
             np.array([w.ra for w in window_ephems]),
             np.array([w.dec for w in window_ephems]),
-            requested_nside,
-            bitwise_factor = 0
+            self.frames.healpix_nside,
         ).astype(int)
 
         # Using the propagated orbits, check each window. Propagate the orbit from the center of
@@ -286,83 +270,42 @@ class PrecoveryDatabase:
                 orbit_window,
                 timedeltas,
             )
-
-            #approx_healpixels is run at requested nside. radec_to_healpixel returns the resampled_healpixel
             approx_healpixels = radec_to_healpixel(
-                approx_ras, approx_decs, requested_nside, bitwise_factor
-                #radec_to_healpixel will return hp.ang2pix(nside, ra, dec, nest=True, lonlat=True).astype(np.int64). We currently have the downsampled_healpixel
-            ).astype(int) 
-
-            #We generate a 2D array of resampled healpixels
-            resampled_healpixels_list= []
-            for healpixel in approx_healpixels:
-                resampled_healpixels_list.append(list(range(healpixel, healpixel+ 2**(bitwise_factor))))
-            resampled_healpixels = np.array(resampled_healpixels_list)
-
+                approx_ras, approx_decs, self.frames.healpix_nside
+            ).astype(int)
 
             keep_mjds = []
             keep_approx_healpixels = []
-
-            for mjd, healpixels, approx_ra, approx_dec, resampled_healpixel in zip(
-                test_mjds, test_healpixels, approx_ras, approx_decs, resampled_healpixels
+            for mjd, healpixels, approx_ra, approx_dec, approx_healpix in zip(
+                test_mjds, test_healpixels, approx_ras, approx_decs, approx_healpixels
             ):
+                logger.debug("mjd=%.6f:\thealpixels with data: %r", mjd, healpixels)
+                logger.debug(
+                    "mjd=%.6f:\tephemeris at ra=%.3f\tdec=%.3f\thealpix=%d",
+                    mjd,
+                    approx_ra,
+                    approx_dec,
+                    approx_healpix,
+                )
 
-                for healpixel in resampled_healpixel:
-                    logger.debug("mjd=%.6f:\thealpixels with data: %r", mjd, healpixels)
-                    logger.debug(
-                        "mjd=%.6f:\tephemeris at ra=%.3f\tdec=%.3f\thealpix=%d",
-                        mjd,
-                        approx_ra,
-                        approx_dec,
-                        healpixel,
-                    )
-            
-                    if healpixel not in healpixels:
-                        # No exposures anywhere near the ephem, so move on.
-                        continue
-                    logger.debug("mjd=%.6f: healpixel collision, checking frames", mjd)
-                    keep_mjds.append(mjd)
-                    keep_approx_healpixels.append(healpixel)
-                
+                if approx_healpix not in healpixels:
+                    # No exposures anywhere near the ephem, so move on.
+                    continue
+                logger.debug("mjd=%.6f: healpixel collision, checking frames", mjd)
+                keep_mjds.append(mjd)
+                keep_approx_healpixels.append(approx_healpix)
+
             if len(keep_mjds) > 0:
                 matches = self._check_frames(
                     orbit_window,
                     keep_approx_healpixels,
-                    obscode,                        
-                    keep_mjds,                    
+                    obscode,
+                    keep_mjds,
                     tolerance,
                     include_frame_candidates
                 )
                 for m in matches:
                     yield m
-            #[m for m in self._check_frames(orbit_window, keep_approx_healpixels, obscode, keep_mjds, tolerance, include_frame_candidates)]
-
-
-    
-    #Mapping function
-    def healpix_converter(self, requested_nside, actual_nside, approx_healpix):
-        nside_ratio = int(self.frames.healpix_nside/requested_nside)
-        bitwise_factor = 2*(self.findPosition(nside_ratio))-1
-        start_healpixel_resampled = approx_healpix << bitwise_factor
-        return list(range(start_healpixel_resampled, start_healpixel_resampled + 2**(bitwise_factor)))
-
-    
-    #Helper function returns true if a number is not a power of 2.
-    def isPowerofTwo(self, n):
-        return (True if(n > 0 and ((n & (n - 1)) > 0)) else False)
-
-    #Helper function that finds the position of the bit set to 1
-    def findPosition(self, n):
-        if (self.isPowerofTwo(n) == True):
-            return -1
-        i = 1
-        pos = 1
-        while ((i & n) == 0):
-            i = i << 1
-            pos += 1
-        return pos
- 
-
 
     def _check_frames(
         self,
@@ -399,10 +342,8 @@ class PrecoveryDatabase:
             healpix_id = int(radec_to_healpixel(
                 exact_ephem.ra,
                 exact_ephem.dec,
-                nside=CANDIDATE_NSIDE,
-                bitwise_factor = 0
+                nside=CANDIDATE_NSIDE
             ))
-            #bitwise_factor = 0 ensures that there are no bitwise operations (bitwise operations are later needed for resampling)
 
             for f in frames:
                 logger.info("checking frame: %s", f)
