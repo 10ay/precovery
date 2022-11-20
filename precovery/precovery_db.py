@@ -192,7 +192,7 @@ class PrecoveryDatabase:
             mjds = [window[0] for window in obs_windows]
 
 
-            #We now check for matches at a requested nside
+            #We for matches at a requested nside
             matches_requested_nside = self._check_windows(
                 requested_nside,
                 mjds,
@@ -227,7 +227,7 @@ class PrecoveryDatabase:
         Find all observations that match orbit within a list of windows
         """
 
-        #Used Latter for resampling healpixels from requested_nside to actual_nside
+        #Used for resampling healpixels from requested_nside to actual_nside
         nside_ratio = int(self.frames.healpix_nside/requested_nside)
         bitwise_factor = 2*(self.findPosition(nside_ratio)-1)
 
@@ -248,6 +248,8 @@ class PrecoveryDatabase:
             requested_nside,
             bitwise_factor = 0
         ).astype(int)
+        #bitwise_factor = 0 ensures that there are no bitwise operations (bitwise operations are later needed for resampling)
+
 
         # Using the propagated orbits, check each window. Propagate the orbit from the center of
         # window using 2-body to find any HealpixFrames where a detection could have occured
@@ -354,7 +356,6 @@ class PrecoveryDatabase:
             pos += 1
         return pos
  
-
 
     def _check_frames(
         self,
