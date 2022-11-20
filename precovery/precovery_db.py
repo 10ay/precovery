@@ -339,14 +339,6 @@ class PrecoveryDatabase:
 
 
     
-    #Mapping function
-    def healpix_converter(self, requested_nside, actual_nside, approx_healpix):
-        nside_ratio = int(self.frames.healpix_nside/requested_nside)
-        bitwise_factor = 2*(self.findPosition(nside_ratio))-1
-        start_healpixel_resampled = approx_healpix << bitwise_factor
-        return list(range(start_healpixel_resampled, start_healpixel_resampled + 2**(bitwise_factor)))
-
-    
     #Helper function returns true if a number is not a power of 2.
     def isPowerofTwo(self, n):
         return (True if(n > 0 and ((n & (n - 1)) > 0)) else False)
